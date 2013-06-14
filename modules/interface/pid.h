@@ -64,7 +64,7 @@
 
 typedef struct
 {
-  float desired;     //< set point
+  float desired;      //< set point
   float error;        //< error
   float prevError;    //< previous error
   float integ;        //< integral
@@ -75,7 +75,8 @@ typedef struct
   float outP;         //< proportional output (debugging)
   float outI;         //< integral output (debugging)
   float outD;         //< derivative output (debugging)
-  float iLimit;      //< integral limit
+  float iLimit;       //< integral limit
+  float dt;           //< delta-time dt
 } PidObject;
 
 /**
@@ -88,7 +89,7 @@ typedef struct
  * @param[in] kd        The derivative gain
  */
 void pidInit(PidObject* pid, const float desired, const float kp,
-             const float ki, const float kd);
+             const float ki, const float kd, const float dt);
 
 /**
  * Set the integral limit for this PID in deg.
@@ -168,5 +169,13 @@ void pidSetKi(PidObject* pid, const float ki);
  * @param[in] kd    The derivative gain
  */
 void pidSetKd(PidObject* pid, const float kd);
+
+/**
+ * Set a new dt gain for the PID. Defaults to IMU_UPDATE_DT apon construction
+ *
+ * @param[in] pid   A pointer to the pid object.
+ * @param[in] dt    Delta time
+ */
+void pidSetDt(PidObject* pid, const float dt);
 
 #endif /* PID_H_ */

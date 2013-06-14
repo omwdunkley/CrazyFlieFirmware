@@ -117,6 +117,15 @@ float pmGetBatteryVoltage(void);
  */
 float pmGetBatteryVoltageMin(void);
 
+
+/**
+ * Returns the current battery voltage from a scale 0-1 (usable range ~3.7V - ~4.1V)
+ */
+float pmGetBatteryVoltagePercent(void);
+
+
+
+
 /**
  * Returns the max battery voltage i volts as a float
  */

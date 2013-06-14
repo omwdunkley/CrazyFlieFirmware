@@ -34,7 +34,8 @@
 #include "led.h"
 #include "motors.h"
 
-void pidInit(PidObject* pid, const float desired, const float kp, const float ki, const float kd) {
+
+void pidInit(PidObject* pid, const float desired, const float kp, const float ki, const float kd, const float dt) {
     pid->error = 0;
     pid->prevError = 0;
     pid->integ = 0;
@@ -44,6 +45,7 @@ void pidInit(PidObject* pid, const float desired, const float kp, const float ki
     pid->ki = ki;
     pid->kd = kd;
     pid->iLimit = DEFAULT_PID_INTEGRATION_LIMIT;
+    pid->dt = dt;
 }
 
 float pidUpdate(PidObject* pid, const float measured, const bool updateError) {
@@ -53,14 +55,14 @@ float pidUpdate(PidObject* pid, const float measured, const bool updateError) {
         pid->error = pid->desired - measured;
     }
 
-    pid->integ += pid->error * IMU_UPDATE_DT;
+    pid->integ += pid->error * pid->dt;
     if (pid->integ > pid->iLimit) {
         pid->integ = pid->iLimit;
     } else if (pid->integ < -pid->iLimit) {
         pid->integ = -pid->iLimit;
     }
 
-    pid->deriv = (pid->error - pid->prevError) / IMU_UPDATE_DT;
+    pid->deriv = (pid->error - pid->prevError) / pid->dt;
 
     pid->outP = pid->kp * pid->error;
     pid->outI = pid->ki * pid->integ;
@@ -116,4 +118,8 @@ void pidSetKi(PidObject* pid, const float ki) {
 
 void pidSetKd(PidObject* pid, const float kd) {
     pid->kd = kd;
+}
+
+void pidSetDt(PidObject* pid, const float dt) {
+    pid->dt = dt;
 }

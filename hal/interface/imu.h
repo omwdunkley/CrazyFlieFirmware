@@ -36,6 +36,7 @@
 #define IMU_UPDATE_FREQ   500
 #define IMU_UPDATE_DT     (float)(1.0/IMU_UPDATE_FREQ)
 
+
 /**
  * Set ACC_WANTED_LPF1_CUTOFF_HZ to the wanted cut-off freq in Hz.
  * The highest cut-off freq that will have any affect is fs /(2*pi).

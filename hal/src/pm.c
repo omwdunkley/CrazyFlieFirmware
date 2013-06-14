@@ -52,6 +52,7 @@ static uint32_t batteryLowTimeStamp;
 static uint32_t batteryCriticalLowTimeStamp;
 static bool isInit;
 
+
 const static float bat671723HS25C[10] = { 3.00, // 00%
         3.78, // 10%
         3.83, // 20%
@@ -63,6 +64,9 @@ const static float bat671723HS25C[10] = { 3.00, // 00%
         4.04, // 80%
         4.10  // 90%
         };
+
+const static float V_RANGE = 4.1-3.0;
+
 LOG_GROUP_START(pm)
 LOG_ADD(LOG_FLOAT, vbat, &batteryVoltage)
 LOG_ADD(LOG_UINT8, state, &pmStateGlobal)
@@ -184,6 +188,10 @@ float pmGetBatteryVoltage(void) {
     return batteryVoltage;
 }
 
+// Return 0-1 where 0 is min V and 1 is max V
+float pmGetBatteryVoltagePercent(void) {
+    return (batteryVoltage-bat671723HS25C[0])/(V_RANGE);
+}
 float pmGetBatteryVoltageMin(void) {
     return batteryVoltageMin;
 }

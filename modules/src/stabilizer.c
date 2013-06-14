@@ -41,6 +41,7 @@
 #include "ledseq.h"
 #include "global.h"
 #include "pid.h"
+#include "pm.h"
 /**
  * Defines in what divided update rate should the attitude
  * control loop run relative the rate control loop.
@@ -48,6 +49,7 @@
 #define ATTITUDE_UPDATE_RATE_DIVIDER  2 //500hz/2  = 250hz
 #define ALTITUDE_UPDATE_RATE_DIVIDER  5 // 500hz/5 = 100hz for barometer measurements
 #define FUSION_UPDATE_DT  (float)(1.0 / (IMU_UPDATE_FREQ / ATTITUDE_UPDATE_RATE_DIVIDER))
+#define BARO_UPDATE_DT  (float)(1.0 / (IMU_UPDATE_FREQ / ALTITUDE_UPDATE_RATE_DIVIDER))
 
 #define LOGGING_ENABLED
 #ifdef LOGGING_ENABLED
@@ -68,6 +70,9 @@ PRIVATE float zAccelAvgAlpha= 0.9; // smooth factor
 PRIVATE float zAccelAvgShort=0;
 PRIVATE float zAccelAlpha= 0.98;
 //PRIVATE float zAccel;
+
+PRIVATE float voltageLong = 0;
+PRIVATE float voltageAlpha = 0.98;
 
 PRIVATE float temperature; // temp of barometer
 PRIVATE float asl_baro; // m above ground
@@ -117,14 +122,15 @@ float hover_ki=0.0;
 float hover_kd=0.0;
 float hover_pid;
 float hoverPidAlpha = 0.75;
+float pid_mag = 1.0; //relates meters asl to thrust
 uint16_t hover_minThrust = 38000;
-uint16_t hover_maxThrust = 44000;;
-//LOG_GROUP_START(stabilizer)
-//LOG_ADD(LOG_FLOAT, roll, &eulerRollActual)
-//LOG_ADD(LOG_FLOAT, pitch, &eulerPitchActual)
-//LOG_ADD(LOG_FLOAT, yaw, &eulerYawActual)
-//LOG_ADD(LOG_UINT16, thrust, &actuatorThrust)
-//LOG_GROUP_STOP(stabilizer)
+uint16_t hover_maxThrust = 44000;
+LOG_GROUP_START(stabilizer)
+LOG_ADD(LOG_FLOAT, roll, &eulerRollActual)
+LOG_ADD(LOG_FLOAT, pitch, &eulerPitchActual)
+LOG_ADD(LOG_FLOAT, yaw, &eulerYawActual)
+LOG_ADD(LOG_UINT16, thrust, &actuatorThrust)
+LOG_GROUP_STOP(stabilizer)
 
 
 
@@ -134,6 +140,7 @@ LOG_ADD(LOG_INT32, m1, &motorPowerFront)
 LOG_ADD(LOG_INT32, m2, &motorPowerRight)
 LOG_ADD(LOG_INT32, m3, &motorPowerRear)
 LOG_ADD(LOG_UINT16, thrust, &actuatorThrust)
+LOG_ADD(LOG_FLOAT, vLong, &voltageLong)
 //LOG_ADD(LOG_UINT8, hover, &hover)
 //LOG_ADD(LOG_UINT8, set_hover, &set_hover)
 LOG_GROUP_STOP(motor)
@@ -194,6 +201,8 @@ PARAM_ADD(PARAM_FLOAT, zAccAlphaShort, &zAccelAlpha)
 PARAM_ADD(PARAM_FLOAT, maxAslErr, &baro_asl_err_max)
 PARAM_ADD(PARAM_FLOAT, hoverPidAlpha, &hoverPidAlpha)
 PARAM_ADD(PARAM_FLOAT, zSpeedKp, &zSpeedKp)
+PARAM_ADD(PARAM_FLOAT, pid_mag, &pid_mag)
+PARAM_ADD(PARAM_FLOAT, voltageAlpha, &voltageAlpha)
 PARAM_GROUP_STOP(hover)
 
 
@@ -269,12 +278,14 @@ static void stabilizerTask(void* param) {
                 // Set hover alititude
                 if (set_hover){
                     hover_target = asl_baro;
-                    pidInit(&altitude_pid, asl_baro, hover_kp, hover_ki, hover_kd);
+                    pidInit(&altitude_pid, asl_baro, hover_kp, hover_ki, hover_kd, BARO_UPDATE_DT );
                     hover_pid = 0;
+                    voltageLong = pmGetBatteryVoltagePercent();
                 }
 
                 // If altitude vs hover_target is invalid we cannot hover
                 if (hover){
+
                     // Update target altitude from joycontroller input
                     hover_target += hover_change/200;
                     pidSetDesired(&altitude_pid, hover_target);
@@ -282,11 +293,12 @@ static void stabilizerTask(void* param) {
                     // LED on
                     if (altitudeCounter==0){
                         ledseqRun(LED_RED, seq_hover);
+                        voltageLong = voltageLong*voltageAlpha + pmGetBatteryVoltagePercent()*(1.f-voltageAlpha);
                     }
 
                     // Compute error, limit the magnitude
-                    hover_error = min(baro_asl_err_max, max(-baro_asl_err_max, hover_target-asl_baro));
-                    pidSetError(&altitude_pid, hover_error);
+                    hover_error = min(baro_asl_err_max, max(-baro_asl_err_max, asl_baro-hover_target));
+                    pidSetError(&altitude_pid, -hover_error);
 
                     // Get control from PID controller, dont update the error (done above)
 
@@ -295,13 +307,12 @@ static void stabilizerTask(void* param) {
                         hover_pid = pidUpdate(&altitude_pid, asl_baro, false);
                     } else {
                         // Smooth it //TODO: same as smoothing the error??
-                        hover_pid = hover_pid * (hoverPidAlpha) + pidUpdate(&altitude_pid, asl_baro, false) * (1.f-hoverPidAlpha);
+                        hover_pid = hover_pid * (hoverPidAlpha) + (asl_vspeed * zSpeedKp + pidUpdate(&altitude_pid, asl_baro, false)) * (1.f-hoverPidAlpha);
                     }
 
 
                     // use vSpeed
-                    hover_pid += asl_vspeed * zSpeedKp; //experiment
-                    actuatorThrust = limitThrust( (int32_t)actuatorThrust + (int32_t)(hover_pid));
+                    actuatorThrust = limitThrust( (int32_t)actuatorThrust + (int32_t)(hover_pid*pid_mag));
 
                 } else {
                     hover_target = 0.0;
@@ -317,8 +328,8 @@ static void stabilizerTask(void* param) {
                 sensfusion6UpdateQ(gyro, acc, FUSION_UPDATE_DT /*, &q0, &q1, &q2, &q3*/);
                 sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
                 //TODO: the offsets dont work in WorldAcc?
-                //sensfusion6UpdateWorldAcc(&acc, (fabs(eulerRollActual)<2 && fabs(eulerPitchActual)<2));
-                //sensfusion6GetWorldAcc(&accWorld);
+                sensfusion6UpdateWorldAcc(&acc, (fabs(eulerRollActual)<2 && fabs(eulerPitchActual)<2));
+                sensfusion6GetWorldAcc(&accWorld);
 
 
                 //zSpeed += accWorld.z * FUSION_UPDATE_DT;
@@ -330,6 +341,7 @@ static void stabilizerTask(void* param) {
 
                 controllerCorrectAttitudePID(eulerRollActual, eulerPitchActual, eulerYawActual, eulerRollDesired, eulerPitchDesired, -eulerYawDesired, &rollRateDesired, &pitchRateDesired, &yawRateDesired);
                 attitudeCounter = 0;
+
             }
 
             if (rollType == RATE) {
@@ -355,6 +367,22 @@ static void stabilizerTask(void* param) {
                 // use hover_target
                 // use asl_baro
             }
+
+
+//            // sum of last 0.25 secs > thresh -> avoid spike
+//            if (accWorld.z < -0.4 && actuatorThrust>12000){ // FREE FALL
+//                actuatorThrust = 60000;
+//            }
+
+            if (abs(eulerRollActual)>75 || abs(eulerPitchActual)>75){
+                if (altitudeCounter==0){
+                    ledseqRun(LED_RED, seq_hover);
+                }
+                actuatorThrust = 0;
+            }
+
+
+
 
             if (actuatorThrust > 0) {
 #if defined(TUNE_ROLL)

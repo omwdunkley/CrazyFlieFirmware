@@ -31,7 +31,9 @@
 void sensfusion6Init(void);
 bool sensfusion6Test(void);
 
-void sensfusion6UpdateQ(Axis3f g, Axis3f a, float dt/*, float* q0out, float* q1out, float* q2out, float* q3out*/);
+void sensfusion6UpdateQ(Axis3f g, Axis3f a, float dt);
+void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f m, float dt);
+
 void sensfusion6GetEulerRPY(float* roll, float* pitch, float* yaw);
 void sensfusion6UpdateWorldAcc(const Axis3f* acc, bool update_offset);
 void sensfusion6UpdateWorldAccBias();

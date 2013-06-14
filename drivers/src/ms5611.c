@@ -270,7 +270,7 @@ void ms5611GetData(float* pressure, float* temperature, float* asl){
 
     int32_t tempPressureRaw, tempTemperatureRaw;
 
-    // DOnt reader faster than we can
+    // Dont reader faster than we can
     uint32_t now = xTaskGetTickCount();
     if ((now - lastConv) < CONVERSION_TIME_MS) {
         return;

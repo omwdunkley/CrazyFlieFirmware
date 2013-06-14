@@ -34,22 +34,14 @@
 
 //#define MADWICK_QUATERNION_IMU
 
-#ifdef MADWICK_QUATERNION_IMU
-#define BETA_DEF     0.01f    // 2 * proportional gain
-#else // MAHONY_QUATERNION_IMU
 #define TWO_KP_DEF  (2.0f * 0.4f) // 2 * proportional gain
 #define TWO_KI_DEF  (2.0f * 0.001f) // 2 * integral gain
-#endif
 
-#ifdef MADWICK_QUATERNION_IMU
-float beta = BETA_DEF;     // 2 * proportional gain (Kp)
-#else // MAHONY_QUATERNION_IMU
 float twoKp = TWO_KP_DEF;    // 2 * proportional gain (Kp)
 float twoKi = TWO_KI_DEF;    // 2 * integral gain (Ki)
 float integralFBx = 0.0f;
 float integralFBy = 0.0f;
 float integralFBz = 0.0f;  // integral error terms scaled by Ki
-#endif
 
 float q0 = 1.0f;
 float q1 = 0.0f;
@@ -60,21 +52,17 @@ Axis3f grav; // estimated gravity direction
 Axis3f grav_offset; // estimated offset. computed when the flie has no thrust and is level //TODO: got to find a better way to do this
 Axis3f accWorldRaw; //not compensated world acceleration
 
-
-LOG_GROUP_START(attitude)
-LOG_ADD(LOG_FLOAT, q0, &q0)
+LOG_GROUP_START(attitude) LOG_ADD(LOG_FLOAT, q0, &q0)
 LOG_ADD(LOG_FLOAT, q1, &q1)
 LOG_ADD(LOG_FLOAT, q2, &q2)
 LOG_ADD(LOG_FLOAT, q3, &q3)
 LOG_GROUP_STOP(attitude)
 
-LOG_GROUP_START(gravoffset)
-LOG_ADD(LOG_FLOAT, x, &grav_offset.x)
+LOG_GROUP_START(gravoffset) LOG_ADD(LOG_FLOAT, x, &grav_offset.x)
 LOG_ADD(LOG_FLOAT, y, &grav_offset.y)
 LOG_ADD(LOG_FLOAT, z, &grav_offset.z)
 LOG_GROUP_STOP(gravoffset)
 static bool isInit;
-
 
 // TODO: Make math util file
 static float invSqrt(float x);
@@ -92,82 +80,7 @@ void sensfusion6Init() {
 bool sensfusion6Test(void) {
     return isInit;
 }
-
-#ifdef MADWICK_QUATERNION_IMU
-// Implementation of Madgwick's IMU and AHRS algorithms.
-// See: http://www.x-io.co.uk/node/8#open_source_ahrs_and_imu_algorithms
-//
-// Date     Author          Notes
-// 29/09/2011 SOH Madgwick    Initial release
-// 02/10/2011 SOH Madgwick  Optimised for reduced CPU load
-void sensfusion6UpdateQ(float gx, float gy, float gz, float ax, float ay, float az, float dt){
-    float recipNorm;
-    float s0, s1, s2, s3;
-    float qDot1, qDot2, qDot3, qDot4;
-    float _2q0, _2q1, _2q2, _2q3, _4q0, _4q1, _4q2 ,_8q1, _8q2, q0q0, q1q1, q2q2, q3q3;
-
-    // Rate of change of quaternion from gyroscope
-    qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
-    qDot2 = 0.5f * (q0 * gx + q2 * gz - q3 * gy);
-    qDot3 = 0.5f * (q0 * gy - q1 * gz + q3 * gx);
-    qDot4 = 0.5f * (q0 * gz + q1 * gy - q2 * gx);
-
-    // Compute feedback only if accelerometer measurement valid (avoids NaN in accelerometer normalisation)
-    if(!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f)))
-    {
-        // Normalise accelerometer measurement
-        recipNorm = invSqrt(ax * ax + ay * ay + az * az);
-        ax *= recipNorm;
-        ay *= recipNorm;
-        az *= recipNorm;
-
-        // Auxiliary variables to avoid repeated arithmetic
-        _2q0 = 2.0f * q0;
-        _2q1 = 2.0f * q1;
-        _2q2 = 2.0f * q2;
-        _2q3 = 2.0f * q3;
-        _4q0 = 4.0f * q0;
-        _4q1 = 4.0f * q1;
-        _4q2 = 4.0f * q2;
-        _8q1 = 8.0f * q1;
-        _8q2 = 8.0f * q2;
-        q0q0 = q0 * q0;
-        q1q1 = q1 * q1;
-        q2q2 = q2 * q2;
-        q3q3 = q3 * q3;
-
-        // Gradient decent algorithm corrective step
-        s0 = _4q0 * q2q2 + _2q2 * ax + _4q0 * q1q1 - _2q1 * ay;
-        s1 = _4q1 * q3q3 - _2q3 * ax + 4.0f * q0q0 * q1 - _2q0 * ay - _4q1 + _8q1 * q1q1 + _8q1 * q2q2 + _4q1 * az;
-        s2 = 4.0f * q0q0 * q2 + _2q0 * ax + _4q2 * q3q3 - _2q3 * ay - _4q2 + _8q2 * q1q1 + _8q2 * q2q2 + _4q2 * az;
-        s3 = 4.0f * q1q1 * q3 - _2q1 * ax + 4.0f * q2q2 * q3 - _2q2 * ay;
-        recipNorm = invSqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);// normalise step magnitude
-        s0 *= recipNorm;
-        s1 *= recipNorm;
-        s2 *= recipNorm;
-        s3 *= recipNorm;
-
-        // Apply feedback step
-        qDot1 -= beta * s0;
-        qDot2 -= beta * s1;
-        qDot3 -= beta * s2;
-        qDot4 -= beta * s3;
-    }
-
-    // Integrate rate of change of quaternion to yield quaternion
-    q0 += qDot1 * dt;
-    q1 += qDot2 * dt;
-    q2 += qDot3 * dt;
-    q3 += qDot4 * dt;
-
-    // Normalise quaternion
-    recipNorm = invSqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3);
-    q0 *= recipNorm;
-    q1 *= recipNorm;
-    q2 *= recipNorm;
-    q3 *= recipNorm;
-}
-#else // MAHONY_QUATERNION_IMU
+// MAHONY_QUATERNION_IMU
 // Madgwick's implementation of Mayhony's AHRS algorithm.
 // See: http://www.x-io.co.uk/node/8#open_source_ahrs_and_imu_algorithms
 //
@@ -242,16 +155,115 @@ void sensfusion6UpdateQ(Axis3f g, Axis3f a, float dt /*, float* q0out, float* q1
     q2 *= recipNorm;
     q3 *= recipNorm;
 
-//    *q0out = q0;
-//    *q1out = q1;
-//    *q2out = q2;
-//    *q3out = q3;
-
-    grav.x = 2 * (q1 * q3 - q0 * q2);
-    grav.y = 2 * (q0 * q1 + q2 * q3);
+    grav.x = 2.f * (q1 * q3 - q0 * q2);
+    grav.y = 2.f * (q0 * q1 + q2 * q3);
     grav.z = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 }
-#endif
+
+// Madgwick's implementation of Mayhony's AHRS algorithm.
+void MahonyAHRSupdate(Axis3f g, Axis3f a, Axis3f m, float dt) {
+    float recipNorm;
+    float q0q0, q0q1, q0q2, q0q3, q1q1, q1q2, q1q3, q2q2, q2q3, q3q3;
+    float hx, hy, bx, bz;
+    float halfvx, halfvy, halfvz, halfwx, halfwy, halfwz;
+    float halfex, halfey, halfez;
+    float qa, qb, qc;
+
+    // Use IMU algorithm if magnetometer measurement invalid (avoids NaN in magnetometer normalisation)
+    if ((m.x == 0.0f) && (m.y == 0.0f) && (m.z == 0.0f)) {
+        sensfusion6UpdateQ(g, a, dt);
+        return;
+    }
+
+    // Compute feedback only if accelerometer measurement valid (avoids NaN in accelerometer normalisation)
+    if (!((a.x == 0.0f) && (a.y == 0.0f) && (a.z == 0.0f))) {
+
+        // Normalise accelerometer measurement
+        recipNorm = invSqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+        a.x *= recipNorm;
+        a.y *= recipNorm;
+        a.z *= recipNorm;
+
+        // Normalise magnetometer measurement
+        recipNorm = invSqrt(m.x * m.x + m.y * m.y + m.z * m.z);
+        m.x *= recipNorm;
+        m.y *= recipNorm;
+        m.z *= recipNorm;
+
+        // Auxiliary variables to avoid repeated arithmetic
+        q0q0 = q0 * q0;
+        q0q1 = q0 * q1;
+        q0q2 = q0 * q2;
+        q0q3 = q0 * q3;
+        q1q1 = q1 * q1;
+        q1q2 = q1 * q2;
+        q1q3 = q1 * q3;
+        q2q2 = q2 * q2;
+        q2q3 = q2 * q3;
+        q3q3 = q3 * q3;
+
+        // Reference direction of Earth's magnetic field
+        hx = 2.0f * (m.x * (0.5f - q2q2 - q3q3) + m.y * (q1q2 - q0q3) + m.z * (q1q3 + q0q2));
+        hy = 2.0f * (m.x * (q1q2 + q0q3) + m.y * (0.5f - q1q1 - q3q3) + m.z * (q2q3 - q0q1));
+        bx = sqrt(hx * hx + hy * hy);
+        bz = 2.0f * (m.x * (q1q3 - q0q2) + m.y * (q2q3 + q0q1) + m.z * (0.5f - q1q1 - q2q2));
+
+        // Estimated direction of gravity and magnetic field
+        halfvx = q1q3 - q0q2;
+        halfvy = q0q1 + q2q3;
+        halfvz = q0q0 - 0.5f + q3q3;
+        halfwx = bx * (0.5f - q2q2 - q3q3) + bz * (q1q3 - q0q2);
+        halfwy = bx * (q1q2 - q0q3) + bz * (q0q1 + q2q3);
+        halfwz = bx * (q0q2 + q1q3) + bz * (0.5f - q1q1 - q2q2);
+
+        // Error is sum of cross product between estimated direction and measured direction of field vectors
+        halfex = (a.y * halfvz - a.z * halfvy) + (m.y * halfwz - m.z * halfwy);
+        halfey = (a.z * halfvx - a.x * halfvz) + (m.z * halfwx - m.x * halfwz);
+        halfez = (a.x * halfvy - a.y * halfvx) + (m.x * halfwy - m.y * halfwx);
+
+        // Compute and apply integral feedback if enabled
+        if (twoKi > 0.0f) {
+            integralFBx += twoKi * halfex * (1.0f / dt);    // integral error scaled by Ki
+            integralFBy += twoKi * halfey * (1.0f / dt);
+            integralFBz += twoKi * halfez * (1.0f / dt);
+            g.x += integralFBx;  // apply integral feedback
+            g.y += integralFBy;
+            g.z += integralFBz;
+        } else {
+            integralFBx = 0.0f; // prevent integral windup
+            integralFBy = 0.0f;
+            integralFBz = 0.0f;
+        }
+
+        // Apply proportional feedback
+        g.x += twoKp * halfex;
+        g.y += twoKp * halfey;
+        g.z += twoKp * halfez;
+    }
+
+    // Integrate rate of change of quaternion
+    g.x *= (0.5f * (1.0f / dt));     // pre-multiply common factors
+    g.y *= (0.5f * (1.0f / dt));
+    g.z *= (0.5f * (1.0f / dt));
+    qa = q0;
+    qb = q1;
+    qc = q2;
+    q0 += (-qb * g.x - qc * g.y - q3 * g.z);
+    q1 += (qa * g.x + qc * g.z - q3 * g.y);
+    q2 += (qa * g.y - qb * g.z + q3 * g.x);
+    q3 += (qa * g.z + qb * g.y - qc * g.x);
+
+    // Normalise quaternion
+    recipNorm = invSqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
+    q0 *= recipNorm;
+    q1 *= recipNorm;
+    q2 *= recipNorm;
+    q3 *= recipNorm;
+
+    grav.x = 2.f * (q1 * q3 - q0 * q2);
+    grav.y = 2.f * (q0 * q1 + q2 * q3);
+    grav.z = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
+}
 
 void sensfusion6GetEulerRPY(float* roll, float* pitch, float* yaw) {
     // TODO why go back to degrees...?
@@ -260,19 +272,14 @@ void sensfusion6GetEulerRPY(float* roll, float* pitch, float* yaw) {
     *roll = atan(grav.y / sqrt(grav.x * grav.x + grav.z * grav.z)) * RAD2DEG;
 }
 
-
-
-void quatMul(const float q1w, const float q1x, const float q1y, const float q1z,
-              const float q2w, const float q2x, const float q2y, const float q2z,
-                    float* q3w,       float* q3x,       float* q3y,      float* q3z){
+void quatMul(const float q1w, const float q1x, const float q1y, const float q1z, const float q2w, const float q2x, const float q2y, const float q2z, float* q3w, float* q3x, float* q3y, float* q3z) {
     *q3w = q1w * q2w - q1x * q2x - q1y * q2y - q1z * q2z;
     *q3x = q1w * q2x + q1x * q2w + q1y * q2z - q1z * q2y;
     *q3y = q1w * q2y + q1y * q2w + q1z * q2x - q1x * q2z;
     *q3z = q1w * q2z + q1z * q2w + q1x * q2y - q1y * q2x;
 }
 
-void quatConj(const float q1w, const float q1x, const float q1y, const float q1z,
-                      float* q2w,       float* q2x,       float* q2y,      float* q2z){
+void quatConj(const float q1w, const float q1x, const float q1y, const float q1z, float* q2w, float* q2x, float* q2y, float* q2z) {
     *q2w = q1w;
     *q2x = -q1y;
     *q2y = -q1z;
@@ -286,24 +293,21 @@ void sensfusion6UpdateWorldAccBias() {
     grav_offset.z = grav_offset.z * 0.98 + accWorldRaw.z * 0.02;
 }
 
-void sensfusion6GetWorldAcc(Axis3f* acc_out){
+void sensfusion6GetWorldAcc(Axis3f* acc_out) {
     acc_out->x = accWorldRaw.x - grav_offset.x;
     acc_out->y = accWorldRaw.y - grav_offset.y;
     acc_out->z = accWorldRaw.z - grav_offset.z;
 }
-void sensfusion6UpdateWorldAcc(const Axis3f* acc, bool update_offset){
+void sensfusion6UpdateWorldAcc(const Axis3f* acc, bool update_offset) {
     // Gravity compensated acceleration
     accWorldRaw.x = acc->x - grav.x;
     accWorldRaw.y = acc->y - grav.y;
-    accWorldRaw.z = acc->z - grav.z ;
+    accWorldRaw.z = acc->z - grav.z;
     float temp;
 
-
     // Mul q with grav
-    float q2w,q2x,q2y,q2z;
-    quatMul(q0,   q1,          q2,          q3,
-             0.f,  accWorldRaw.x, accWorldRaw.y, accWorldRaw.z,
-             &q2w, &q2x,        &q2y,        &q2z);
+    float q2w, q2x, q2y, q2z;
+    quatMul(q0, q1, q2, q3, 0.f, accWorldRaw.x, accWorldRaw.y, accWorldRaw.z, &q2w, &q2x, &q2y, &q2z);
 
 //    // Conjugate
 //    float q1w,q1x,q1y,q1z;
@@ -315,14 +319,11 @@ void sensfusion6UpdateWorldAcc(const Axis3f* acc, bool update_offset){
 //             q1w,q1x,q1y,q1z,
 //             0, &accWorldRaw.x, &accWorldRaw.y, &accWorldRaw.z);
 
-
-
     // Mul that with Conj to get world frame
-    quatMul(q2w,     q2x,              q2y,              q2z,
-             q0,     -q1,              -q2,              -q3, //conjugate of q
-             &temp,   &(accWorldRaw.x), &(accWorldRaw.y), &(accWorldRaw.z));
+    quatMul(q2w, q2x, q2y, q2z, q0, -q1, -q2, -q3, //conjugate of q
+            &temp, &(accWorldRaw.x), &(accWorldRaw.y), &(accWorldRaw.z));
 
-    if (update_offset){
+    if (update_offset) {
         sensfusion6UpdateWorldAccBias();
     }
 }
