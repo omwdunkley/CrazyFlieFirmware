@@ -48,17 +48,22 @@ float q1 = 0.0f;
 float q2 = 0.0f;
 float q3 = 0.0f;  // quaternion of sensor frame relative to auxiliary frame
 
+
+bool magImu = true;
+
 Axis3f grav; // estimated gravity direction
 Axis3f grav_offset; // estimated offset. computed when the flie has no thrust and is level //TODO: got to find a better way to do this
 Axis3f accWorldRaw; //not compensated world acceleration
 
-LOG_GROUP_START(attitude) LOG_ADD(LOG_FLOAT, q0, &q0)
+LOG_GROUP_START(attitude)
+LOG_ADD(LOG_FLOAT, q0, &q0)
 LOG_ADD(LOG_FLOAT, q1, &q1)
 LOG_ADD(LOG_FLOAT, q2, &q2)
 LOG_ADD(LOG_FLOAT, q3, &q3)
 LOG_GROUP_STOP(attitude)
 
-LOG_GROUP_START(gravoffset) LOG_ADD(LOG_FLOAT, x, &grav_offset.x)
+LOG_GROUP_START(gravoffset)
+LOG_ADD(LOG_FLOAT, x, &grav_offset.x)
 LOG_ADD(LOG_FLOAT, y, &grav_offset.y)
 LOG_ADD(LOG_FLOAT, z, &grav_offset.z)
 LOG_GROUP_STOP(gravoffset)
@@ -87,7 +92,7 @@ bool sensfusion6Test(void) {
 // Date     Author      Notes
 // 29/09/2011 SOH Madgwick    Initial release
 // 02/10/2011 SOH Madgwick  Optimised for reduced CPU load
-void sensfusion6UpdateQ(Axis3f g, Axis3f a, float dt /*, float* q0out, float* q1out, float* q2out, float* q3out*/) {
+void sensfusion6UpdateQ(Axis3f g, Axis3f a, float dt) {
     float recipNorm;
     float halfvx, halfvy, halfvz;
     float halfex, halfey, halfez;
@@ -161,19 +166,24 @@ void sensfusion6UpdateQ(Axis3f g, Axis3f a, float dt /*, float* q0out, float* q1
 }
 
 // Madgwick's implementation of Mayhony's AHRS algorithm.
-void MahonyAHRSupdate(Axis3f g, Axis3f a, Axis3f m, float dt) {
-    float recipNorm;
-    float q0q0, q0q1, q0q2, q0q3, q1q1, q1q2, q1q3, q2q2, q2q3, q3q3;
-    float hx, hy, bx, bz;
-    float halfvx, halfvy, halfvz, halfwx, halfwy, halfwz;
-    float halfex, halfey, halfez;
-    float qa, qb, qc;
+void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f m, float dt) {
+
+    if (!magImu){
+        return sensfusion6UpdateQ(g,a,dt);
+    }
 
     // Use IMU algorithm if magnetometer measurement invalid (avoids NaN in magnetometer normalisation)
     if ((m.x == 0.0f) && (m.y == 0.0f) && (m.z == 0.0f)) {
         sensfusion6UpdateQ(g, a, dt);
         return;
     }
+
+    float recipNorm;
+    float q0q0, q0q1, q0q2, q0q3, q1q1, q1q2, q1q3, q2q2, q2q3, q3q3;
+    float hx, hy, bx, bz;
+    float halfvx, halfvy, halfvz, halfwx, halfwy, halfwz;
+    float halfex, halfey, halfez;
+    float qa, qb, qc;
 
     // Compute feedback only if accelerometer measurement valid (avoids NaN in accelerometer normalisation)
     if (!((a.x == 0.0f) && (a.y == 0.0f) && (a.z == 0.0f))) {
@@ -341,10 +351,7 @@ float invSqrt(float x) {
     return y;
 }
 PARAM_GROUP_START(sensorfusion6)
-#ifdef MADWICK_QUATERNION_IMU
-PARAM_ADD(PARAM_FLOAT, beta, &beta)
-#else // MAHONY_QUATERNION_IMU
 PARAM_ADD(PARAM_FLOAT, kp, &twoKp)
 PARAM_ADD(PARAM_FLOAT, ki, &twoKi)
-#endif
+PARAM_ADD(PARAM_UINT8, magImu, &magImu)
 PARAM_GROUP_STOP(sensorfusion6)

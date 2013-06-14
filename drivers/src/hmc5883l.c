@@ -39,10 +39,33 @@
 
 #include "hmc5883l.h"
 #include "i2cdev.h"
+#include "global.h"
+#include "param.h"
 
 uint8_t devAddr;
 uint8_t buffer[6];
 uint8_t mode;
+static MagCalibObject magCalib;
+
+PARAM_GROUP_START(magCalib)
+PARAM_ADD(PARAM_FLOAT, off_x, &magCalib.offset.x)
+PARAM_ADD(PARAM_FLOAT, off_y, &magCalib.offset.y)
+PARAM_ADD(PARAM_FLOAT, off_z, &magCalib.offset.z)
+PARAM_ADD(PARAM_FLOAT, scale_x, &magCalib.scale.x)
+PARAM_ADD(PARAM_FLOAT, scale_y, &magCalib.scale.y)
+PARAM_ADD(PARAM_FLOAT, scale_z, &magCalib.scale.z)
+PARAM_ADD(PARAM_FLOAT, thrust_x, &magCalib.thrust_comp.x)
+PARAM_ADD(PARAM_FLOAT, thrust_y, &magCalib.thrust_comp.y)
+PARAM_ADD(PARAM_FLOAT, thrust_z, &magCalib.thrust_comp.z)
+PARAM_GROUP_STOP(magCalib)
+
+
+
+
+
+
+
+
 static I2C_TypeDef *I2Cx;
 static bool isInit;
 
@@ -66,6 +89,17 @@ void hmc5883lInit(I2C_TypeDef *i2cPort) {
 
     // write CONFIG_B register
     hmc5883lSetGain(HMC5883L_GAIN_1090);
+
+    magCalib.scale.x = 0;
+    magCalib.scale.y = 0;
+    magCalib.scale.z = 0;
+    magCalib.offset.x = 0;
+    magCalib.offset.y = 0;
+    magCalib.offset.z = 0;
+    magCalib.thrust_comp.x = 0;
+    magCalib.thrust_comp.y = 0;
+    magCalib.thrust_comp.z = 0;
+    magCalib.calibrated = false;
 
     isInit = TRUE;
 }
@@ -342,6 +376,50 @@ void hmc5883lGetHeading(int16_t *x, int16_t *y, int16_t *z) {
     *y = (((int16_t) buffer[4]) << 8) | buffer[5];
     *z = (((int16_t) buffer[2]) << 8) | buffer[3];
 }
+
+
+
+
+
+void hmc5883lGetHeadingCalibrated(Axis3f* magOut, Axis3f* magOutRaw, const uint16_t thrust) {
+    // Get raw data
+    int16_t mx, my, mz;
+    hmc5883lGetHeading(&mx, &my, &mz);
+
+    // Convert to float (and scale)
+    magOutRaw->x = (float) mx;  // * 2.27; //to get mG for 4.0gain - see data asheet page 13
+    magOutRaw->y = (float) my;  // * 2.27;
+    magOutRaw->z = (float) mz;  // * 2.27;
+
+
+
+    // If calibrated, return calibrated values, else return (0,0,0)
+    if (magCalib.calibrated) {
+        const float thrust_f = (float) thrust;
+        magOut->x = (magOutRaw->x - magCalib.offset.x) / magCalib.scale.x - thrust_f * magCalib.thrust_comp.x;
+        magOut->y = (magOutRaw->y - magCalib.offset.y) / magCalib.scale.y - thrust_f * magCalib.thrust_comp.y;
+        magOut->z = (magOutRaw->z - magCalib.offset.z) / magCalib.scale.z - thrust_f * magCalib.thrust_comp.z;
+    } else {
+        magOut->x = 0;
+        magOut->y = 0;
+        magOut->z = 0;
+
+        // TODO nicer way to do this?:
+        magCalib.calibrated =
+                (magCalib.offset.x  != 0.f) &&
+                (magCalib.offset.y  != 0.f) &&
+                (magCalib.offset.z  != 0.f) &&
+                (magCalib.scale.x  != 0.f) &&
+                (magCalib.scale.y  != 0.f) &&
+                (magCalib.scale.z  != 0.f) &&
+                (magCalib.thrust_comp.x  != 0.f) &&
+                (magCalib.thrust_comp.y  != 0.f) &&
+                (magCalib.thrust_comp.z  != 0.f);
+    }
+}
+
+
+
 /** Get X-axis heading measurement.
  * @return 16-bit signed integer with X-axis heading
  * @see HMC5883L_RA_DATAX_H
@@ -391,7 +469,8 @@ int16_t hmc5883lGetHeadingZ() {
  * @return Data output register lock status
  * @see HMC5883L_RA_STATUS
  * @see HMC5883L_STATUS_LOCK_BIT
- */bool hmc5883lGetLockStatus() {
+ */
+bool hmc5883lGetLockStatus() {
     i2cdevReadBit(I2Cx, devAddr, HMC5883L_RA_STATUS, HMC5883L_STATUS_LOCK_BIT, buffer);
     return buffer[0];
 }
@@ -404,7 +483,8 @@ int16_t hmc5883lGetHeadingZ() {
  * @return Data ready status
  * @see HMC5883L_RA_STATUS
  * @see HMC5883L_STATUS_READY_BIT
- */bool hmc5883lGetReadyStatus() {
+ */
+bool hmc5883lGetReadyStatus() {
     i2cdevReadBit(I2Cx, devAddr, HMC5883L_RA_STATUS, HMC5883L_STATUS_READY_BIT, buffer);
     return buffer[0];
 }

@@ -62,6 +62,8 @@ PRIVATE Axis3f gyro; // Gyro axis data in deg/s
 PRIVATE Axis3f acc;  // Accelerometer axis data in mG
 PRIVATE Axis3f accWorld;  // Accelerometer world axis data in mG
 PRIVATE Axis3f mag;  //
+PRIVATE Axis3f magRaw;  //
+
 PRIVATE float zSpeed=0.0; // Vertical speed (world frame) integrated from vertical acceleration
 PRIVATE float zReduce= 0.995; // Factor to continuously reduce speed -> stops accerleration integration getting out of control
 
@@ -103,7 +105,7 @@ RPYType rollType;
 RPYType pitchType;
 RPYType yawType;
 
-uint16_t actuatorThrust;
+uint16_t actuatorThrust = 0;
 int16_t actuatorRoll;
 int16_t actuatorPitch;
 int16_t actuatorYaw;
@@ -122,14 +124,13 @@ float hover_ki=0.0;
 float hover_kd=0.0;
 float hover_pid;
 float hoverPidAlpha = 0.75;
-float pid_mag = 1.0; //relates meters asl to thrust
+float pid_mag = 1.0; //relates meters asl to thrust //TODO bad name, nothing to to with magnetometer
 uint16_t hover_minThrust = 38000;
 uint16_t hover_maxThrust = 44000;
 LOG_GROUP_START(stabilizer)
 LOG_ADD(LOG_FLOAT, roll, &eulerRollActual)
 LOG_ADD(LOG_FLOAT, pitch, &eulerPitchActual)
 LOG_ADD(LOG_FLOAT, yaw, &eulerYawActual)
-LOG_ADD(LOG_UINT16, thrust, &actuatorThrust)
 LOG_GROUP_STOP(stabilizer)
 
 
@@ -149,6 +150,9 @@ LOG_GROUP_START(mag)
 LOG_ADD(LOG_FLOAT, x, &mag.x)
 LOG_ADD(LOG_FLOAT, y, &mag.y)
 LOG_ADD(LOG_FLOAT, z, &mag.z)
+LOG_ADD(LOG_FLOAT, x_raw, &magRaw.x)
+LOG_ADD(LOG_FLOAT, y_raw, &magRaw.y)
+LOG_ADD(LOG_FLOAT, z_raw, &magRaw.z)
 LOG_GROUP_STOP(mag)
 
 LOG_GROUP_START(gyro)
@@ -258,7 +262,7 @@ static void stabilizerTask(void* param) {
     while (1) {
         vTaskDelayUntil(&lastWakeTime, F2T(IMU_UPDATE_FREQ) );
 
-        imu9Read(&gyro, &acc, &mag);
+        imu9Read(&gyro, &acc, &mag, &magRaw, actuatorThrust);
 
         if (imu6IsCalibrated()) {
             commanderGetRPY(&eulerRollDesired, &eulerPitchDesired, &eulerYawDesired);
@@ -325,7 +329,11 @@ static void stabilizerTask(void* param) {
 
             // 250hz
             if (++attitudeCounter >= ATTITUDE_UPDATE_RATE_DIVIDER) {
-                sensfusion6UpdateQ(gyro, acc, FUSION_UPDATE_DT /*, &q0, &q1, &q2, &q3*/);
+//                if (magImu){
+                    sensfusion9UpdateQ( gyro, acc, mag, FUSION_UPDATE_DT);
+//                } else {
+//                    sensfusion6UpdateQ(gyro, acc, FUSION_UPDATE_DT);
+//                }
                 sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
                 //TODO: the offsets dont work in WorldAcc?
                 sensfusion6UpdateWorldAcc(&acc, (fabs(eulerRollActual)<2 && fabs(eulerPitchActual)<2));
@@ -374,12 +382,13 @@ static void stabilizerTask(void* param) {
 //                actuatorThrust = 60000;
 //            }
 
-            if (abs(eulerRollActual)>75 || abs(eulerPitchActual)>75){
-                if (altitudeCounter==0){
-                    ledseqRun(LED_RED, seq_hover);
-                }
-                actuatorThrust = 0;
-            }
+            //TODO: check if flie not upright, kill engines
+//            if (abs(eulerRollActual)>75 || abs(eulerPitchActual)>75){
+//                if (altitudeCounter==0){
+//                    ledseqRun(LED_RED, seq_hover);
+//                }
+//                actuatorThrust = 0;
+//            }
 
 
 

@@ -239,16 +239,10 @@ bool imu6Test(void) {
 //    ++counter;
 //}
 
-void imu9Read(Axis3f* gyroOut, Axis3f* accOut, Axis3f* magOut) {
+void imu9Read(Axis3f* gyroOut, Axis3f* accOut, Axis3f* magOut,  Axis3f* magOutRaw, const uint16_t thrust) {
 
-    // MAG
-    // todo: bias? calib?
-    int16_t mx, my, mz;
-    hmc5883lGetHeading(&mx, &my, &mz);
-    magOut->x = (float)mx * 2.27; //to get mG for 4.0gain - see data asheet page 13
-    magOut->y = (float)my * 2.27;
-    magOut->z = (float)mz * 2.27;
 
+    hmc5883lGetHeadingCalibrated(magOut, magOutRaw, thrust);
 
     // ACC / GYRO
     mpu6050GetMotion6(&accelMpu.x, &accelMpu.y, &accelMpu.z, &gyroMpu.x, &gyroMpu.y, &gyroMpu.z);

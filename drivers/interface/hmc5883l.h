@@ -31,6 +31,7 @@ THE SOFTWARE.
 #ifndef HMC5883L_H_
 #define HMC5883L_H_
 #include <stdbool.h>
+#include "global.h"
 
 #define HMC5883L_ADDRESS            0x1E // this device only has one address
 #define HMC5883L_DEFAULT_ADDRESS    0x1E
@@ -118,10 +119,23 @@ THE SOFTWARE.
 #define HMC5883L_ST_Z_MIN           (int32_t)(HMC5883L_ST_Z_NORM - (HMC5883L_ST_Z_NORM * HMC5883L_ST_ERROR))
 #define HMC5883L_ST_Z_MAX           (int32_t)(HMC5883L_ST_Z_NORM + (HMC5883L_ST_Z_NORM * HMC5883L_ST_ERROR))
 
+
+
+
+typedef struct {
+  Axis3f offset;       //< centers the magnetic field ellipse to origin
+  Axis3f scale;        //< spherises the ellipse to a unit sphere
+  Axis3f thrust_comp;  //< compensates for thrust. Vector points in direction of magnetic distortion with length*thrust = offset in this direction
+  bool calibrated;
+} MagCalibObject;
+
+
 void hmc5883lInit(I2C_TypeDef *i2cPort);
 bool hmc5883lTestConnection();
 bool hmc5883lSelfTest();
 bool hmc5883lEvaluateSelfTest(int16_t min, int16_t max, int16_t value, char* string);
+
+
 
 // CONFIG_A register
 uint8_t hmc5883lGetSampleAveraging();
@@ -153,5 +167,9 @@ bool hmc5883lGetReadyStatus();
 uint8_t hmc5883lGetIDA();
 uint8_t hmc5883lGetIDB();
 uint8_t hmc5883lGetIDC();
+
+// High level
+//
+void hmc5883lGetHeadingCalibrated(Axis3f* magOut, Axis3f* magOutRaw, const uint16_t thrust);
 
 #endif /* HMC5883L_H_ */

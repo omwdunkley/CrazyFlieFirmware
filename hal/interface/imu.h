@@ -54,7 +54,7 @@
 
 void imu6Init(void);
 bool imu6Test(void);
-void imu9Read(Axis3f* gyro, Axis3f* acc, Axis3f* mag);
+void imu9Read(Axis3f* gyroOut, Axis3f* accOut, Axis3f* magOut,  Axis3f* magOutRaw, const uint16_t thrust);
 bool imu6IsCalibrated(void);
 void baroGetData(float* pressure, float* asl_baro, float* temperature);
 
