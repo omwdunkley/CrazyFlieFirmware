@@ -64,30 +64,28 @@ PRIVATE Axis3f accWorld;  // Accelerometer world axis data in mG
 PRIVATE Axis3f mag;  //
 PRIVATE Axis3f magRaw;  //
 
-PRIVATE float zSpeed=0.0; // Vertical speed (world frame) integrated from vertical acceleration
-PRIVATE float zReduce= 0.995; // Factor to continuously reduce speed -> stops accerleration integration getting out of control
+PRIVATE bool throttleOff = false;
 
-PRIVATE float zAccelAvgLong= 0.; // longterm avg z accel
-PRIVATE float zAccelAvgAlpha= 0.9; // smooth factor
-PRIVATE float zAccelAvgShort=0;
-PRIVATE float zAccelAlpha= 0.98;
-//PRIVATE float zAccel;
+PRIVATE float zSpeed=0.0; // Vertical speed (world frame) integrated from vertical acceleration
+PRIVATE float zBias=0.0; // Vertical speed (world frame) integrated from vertical acceleration, but lots of smoothing to estiamte drift
 
 PRIVATE float voltageLong = 0;
 PRIVATE float voltageAlpha = 0.98;
 
 PRIVATE float temperature; // temp of barometer
-PRIVATE float asl_baro; // m above ground
-PRIVATE float asl_baro_raw; // m above ground
-PRIVATE float asl_baro_long; // long term, used to estimate vertical speed using baro
-PRIVATE float baro_alpha = 0.92;
-PRIVATE float baro_alpha_long = 0.98;
+PRIVATE float asl; // m above ground
+PRIVATE float aslRaw; // m above ground
+PRIVATE float aslLong; // long term, used to estimate vertical speed using baro
+PRIVATE float aslAlpha = 0.92;
+PRIVATE float aslAlphaLong = 0.93;
 PRIVATE float asl_vspeed = 0.0;
+PRIVATE float acc_vspeed = 0.0;
+PRIVATE float zBiasAlpha = 0.995;
 PRIVATE float pressure; // pressure
 PRIVATE float hover_error;
-PRIVATE float baro_asl_err_max = 0.2; //meters
-PRIVATE float zSpeedKp = 0;
-//PRIVATE float q0, q1, q2, q3;
+PRIVATE float baro_asl_err_max = 0.6; //meters
+PRIVATE float asl_vspeedFac = 0;
+PRIVATE float acc_vspeedFac = 0;
 
 PRIVATE float eulerRollActual;
 PRIVATE float eulerPitchActual;
@@ -117,16 +115,18 @@ uint32_t motorPowerRear;
 
 bool hover = false;
 bool set_hover = false;
+float zDeadband = 0.01;
 float hover_change = 0;
 float hover_target = -1;
 float hover_kp=1.0;
 float hover_ki=0.0;
 float hover_kd=0.0;
 float hover_pid;
-float hoverPidAlpha = 0.75;
-float pid_mag = 1.0; //relates meters asl to thrust //TODO bad name, nothing to to with magnetometer
+float pidAlpha = 0.75;
+float pid_fac = 1.0; //relates meters asl to thrust //TODO bad name, nothing to to with magnetometer
 uint16_t hover_minThrust = 38000;
 uint16_t hover_maxThrust = 44000;
+uint16_t hover_baseThrust = 42000;
 LOG_GROUP_START(stabilizer)
 LOG_ADD(LOG_FLOAT, roll, &eulerRollActual)
 LOG_ADD(LOG_FLOAT, pitch, &eulerPitchActual)
@@ -171,42 +171,51 @@ LOG_ADD(LOG_FLOAT, zw, &accWorld.z)
 LOG_GROUP_STOP(acc)
 
 LOG_GROUP_START(baro)
-LOG_ADD(LOG_FLOAT, asl, &asl_baro)
-LOG_ADD(LOG_FLOAT, asl_raw, &asl_baro_raw)
-LOG_ADD(LOG_FLOAT, asl_long, &asl_baro_long)
+LOG_ADD(LOG_FLOAT, asl, &asl)
+LOG_ADD(LOG_FLOAT, aslRaw, &aslRaw)
+LOG_ADD(LOG_FLOAT, aslLong, &aslLong)
 LOG_ADD(LOG_FLOAT, temp, &temperature)
 LOG_ADD(LOG_FLOAT, pressure, &pressure)
-LOG_ADD(LOG_FLOAT, asl_vspeed, &asl_vspeed)
 LOG_GROUP_STOP(baro)
 
 LOG_GROUP_START(hover)
-LOG_ADD(LOG_FLOAT, pid, &hover_pid)
-//LOG_ADD(LOG_FLOAT, err, &altitude_pid.error)
-//LOG_ADD(LOG_FLOAT, p, &altitude_pid.outP)
-//LOG_ADD(LOG_FLOAT, i, &altitude_pid.outI)
-//LOG_ADD(LOG_FLOAT, d, &altitude_pid.outD)
 LOG_ADD(LOG_FLOAT, err, &hover_error)
 LOG_ADD(LOG_FLOAT, target, &hover_target)
 LOG_ADD(LOG_FLOAT, zSpeed, &zSpeed)
-LOG_ADD(LOG_FLOAT, zAccLong, &zAccelAvgLong)
-LOG_ADD(LOG_FLOAT, zAccShort, &zAccelAvgShort)
+LOG_ADD(LOG_FLOAT, zBias, &zBias)
+LOG_ADD(LOG_FLOAT, acc_vspeed, &acc_vspeed)
+LOG_ADD(LOG_FLOAT, asl_vspeed, &asl_vspeed)
 LOG_GROUP_STOP(hover)
 
+
+LOG_GROUP_START(zpid)
+LOG_ADD(LOG_FLOAT, pid, &hover_pid)
+LOG_ADD(LOG_FLOAT, p, &altitude_pid.outP)
+LOG_ADD(LOG_FLOAT, i, &altitude_pid.outI)
+LOG_ADD(LOG_FLOAT, d, &altitude_pid.outD)
+LOG_GROUP_STOP(zpid)
+
 PARAM_GROUP_START(hover)
-PARAM_ADD(PARAM_FLOAT, aslAlpha, &baro_alpha)
-PARAM_ADD(PARAM_FLOAT, aslAlphaLong, &baro_alpha_long)
+PARAM_ADD(PARAM_FLOAT, aslAlpha, &aslAlpha)
+PARAM_ADD(PARAM_FLOAT, aslAlphaLong, &aslAlphaLong)
 PARAM_ADD(PARAM_FLOAT, kp, &hover_kp)
 PARAM_ADD(PARAM_FLOAT, ki, &hover_ki)
 PARAM_ADD(PARAM_FLOAT, kd, &hover_kd)
 PARAM_ADD(PARAM_UINT16, maxThrust, &hover_maxThrust)
 PARAM_ADD(PARAM_UINT16, minThrust, &hover_minThrust)
-PARAM_ADD(PARAM_FLOAT, zAccAlphaLong, &zAccelAvgAlpha)
-PARAM_ADD(PARAM_FLOAT, zAccAlphaShort, &zAccelAlpha)
-PARAM_ADD(PARAM_FLOAT, maxAslErr, &baro_asl_err_max)
-PARAM_ADD(PARAM_FLOAT, hoverPidAlpha, &hoverPidAlpha)
-PARAM_ADD(PARAM_FLOAT, zSpeedKp, &zSpeedKp)
-PARAM_ADD(PARAM_FLOAT, pid_mag, &pid_mag)
+PARAM_ADD(PARAM_UINT16, baseThrust, &hover_baseThrust)
+PARAM_ADD(PARAM_FLOAT, aslErrMax, &baro_asl_err_max)
+PARAM_ADD(PARAM_FLOAT, pidAlpha, &pidAlpha)
+PARAM_ADD(PARAM_FLOAT, asl_vspeedFac, &asl_vspeedFac)
+PARAM_ADD(PARAM_FLOAT, pid_fac, &pid_fac)
 PARAM_ADD(PARAM_FLOAT, voltageAlpha, &voltageAlpha)
+PARAM_ADD(PARAM_FLOAT, zDeadband, &zDeadband)
+PARAM_ADD(PARAM_FLOAT, acc_vspeedFac, &acc_vspeedFac)
+PARAM_ADD(PARAM_FLOAT, zBiasAlpha, &zBiasAlpha)
+PARAM_ADD(PARAM_UINT8, throttleOff, &throttleOff)
+//PARAM_ADD(PARAM_FLOAT, zReduce, &zReduce)
+//PARAM_ADD(PARAM_FLOAT, zAccAlphaLong, &zAccelAvgAlpha)
+//PARAM_ADD(PARAM_FLOAT, zAccAlphaShort, &zAccelAlpha)
 PARAM_GROUP_STOP(hover)
 
 
@@ -271,52 +280,71 @@ static void stabilizerTask(void* param) {
 
             // 100hz
             if (++altitudeCounter >= ALTITUDE_UPDATE_RATE_DIVIDER) {
-                //TODO: do the smoothing within getData
-                ms5611GetData(&pressure, &temperature, &asl_baro_raw);
-                asl_baro = asl_baro*baro_alpha + asl_baro_raw * (1-baro_alpha);
-                asl_baro_long = asl_baro_long*baro_alpha_long + asl_baro_raw * (1-baro_alpha_long);
-                asl_vspeed = asl_baro-asl_baro_long;
                 altitudeCounter = 0;
 
+                //TODO: do the smoothing within getData
+                ms5611GetData(&pressure, &temperature, &aslRaw);
+                asl     = asl     * aslAlpha     + aslRaw * (1-aslAlpha);
+                aslLong = aslLong * aslAlphaLong + aslRaw * (1-aslAlphaLong);
+
+                // Vertical speed based on baro and acc
+                asl_vspeed = asl    - aslLong;
+                acc_vspeed = zSpeed - zBias;
+
+
                 commanderGetHover(&hover, &set_hover, &hover_change);
-                // Set hover alititude
+                // Set hover altitude
                 if (set_hover){
-                    hover_target = asl_baro;
-                    pidInit(&altitude_pid, asl_baro, hover_kp, hover_ki, hover_kd, BARO_UPDATE_DT );
-                    hover_pid = 0;
+                    // Set to current altitude
+                    hover_target = asl;
+
+                    // Reset PID controller
+                    pidInit(&altitude_pid, asl, hover_kp, hover_ki, hover_kd, BARO_UPDATE_DT );
+                    // Reset hover_pid
+                    hover_pid = pidUpdate(&altitude_pid, asl, false);
+
+                    zSpeed = 0.0;
+                    zBias = 0.0;
+
+                    //Get hover voltage
                     voltageLong = pmGetBatteryVoltagePercent();
                 }
 
                 // If altitude vs hover_target is invalid we cannot hover
                 if (hover){
 
-                    // Update target altitude from joycontroller input
+                    // Update target altitude from joy controller input
                     hover_target += hover_change/200;
                     pidSetDesired(&altitude_pid, hover_target);
 
-                    // LED on
+                    // LED on to show hover mode active
                     if (altitudeCounter==0){
                         ledseqRun(LED_RED, seq_hover);
                         voltageLong = voltageLong*voltageAlpha + pmGetBatteryVoltagePercent()*(1.f-voltageAlpha);
                     }
 
-                    // Compute error, limit the magnitude
-                    hover_error = min(baro_asl_err_max, max(-baro_asl_err_max, asl_baro-hover_target));
+                    // Compute error (current - target), limit the error
+                    hover_error = min(baro_asl_err_max, max(-baro_asl_err_max, asl-hover_target));
                     pidSetError(&altitude_pid, -hover_error);
 
                     // Get control from PID controller, dont update the error (done above)
-
-                    if (set_hover){
-                        // Reset hover_pid
-                        hover_pid = pidUpdate(&altitude_pid, asl_baro, false);
-                    } else {
-                        // Smooth it //TODO: same as smoothing the error??
-                        hover_pid = hover_pid * (hoverPidAlpha) + (asl_vspeed * zSpeedKp + pidUpdate(&altitude_pid, asl_baro, false)) * (1.f-hoverPidAlpha);
-                    }
+                    // Smooth it and include barometer vspeed
+                    // TODO: same as smoothing the error??
+                    hover_pid =   (pidAlpha    ) * hover_pid
+                              + (1.f-pidAlpha) * ((acc_vspeed * acc_vspeedFac) + (asl_vspeed * asl_vspeedFac) + pidUpdate(&altitude_pid, asl, false));
 
 
-                    // use vSpeed
-                    actuatorThrust = limitThrust( (int32_t)actuatorThrust + (int32_t)(hover_pid*pid_mag));
+
+
+
+
+                    actuatorThrust = max( hover_minThrust,
+                                        min(hover_maxThrust,
+                                                limitThrust( hover_baseThrust + (int32_t)(hover_pid*pid_fac))
+                                            )
+                                        );
+
+                    // i part should compensate for voltage drop
 
                 } else {
                     hover_target = 0.0;
@@ -329,23 +357,23 @@ static void stabilizerTask(void* param) {
 
             // 250hz
             if (++attitudeCounter >= ATTITUDE_UPDATE_RATE_DIVIDER) {
-//                if (magImu){
-                    sensfusion9UpdateQ( gyro, acc, mag, FUSION_UPDATE_DT);
-//                } else {
-//                    sensfusion6UpdateQ(gyro, acc, FUSION_UPDATE_DT);
-//                }
+                sensfusion9UpdateQ( gyro, acc, mag, FUSION_UPDATE_DT);
+
+
                 sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
-                //TODO: the offsets dont work in WorldAcc?
+
+                // Get acc in world frame, update error
                 sensfusion6UpdateWorldAcc(&acc, (fabs(eulerRollActual)<2 && fabs(eulerPitchActual)<2));
                 sensfusion6GetWorldAcc(&accWorld);
 
+                // Estimate speed from acc (drifts)
+                zSpeed += accWorld.z * FUSION_UPDATE_DT;
 
-                //zSpeed += accWorld.z * FUSION_UPDATE_DT;
-                //zSpeed *= zReduce;
+                // long term bias estimate
+                zBias  = zBias  * zBiasAlpha + zSpeed * (1.f - zBiasAlpha);
 
-                //zAccelAvgLong  = zAccelAvgLong  * zAccelAvgAlpha + accWorld.z * (1.f - zAccelAvgAlpha);
-                //zAccelAvgShort = zAccelAvgShort * zAccelAlpha    + accWorld.z * (1.f - zAccelAlpha);
-                //zSpeed = zAccelAvgShort - zAccelAvgLong;
+                // Get speed
+                //acc_vspeed = zSpeed - zBias;
 
                 controllerCorrectAttitudePID(eulerRollActual, eulerPitchActual, eulerYawActual, eulerRollDesired, eulerPitchDesired, -eulerYawDesired, &rollRateDesired, &pitchRateDesired, &yawRateDesired);
                 attitudeCounter = 0;
@@ -373,7 +401,7 @@ static void stabilizerTask(void* param) {
                 // hover code
                 // use acceleration
                 // use hover_target
-                // use asl_baro
+                // use asl
             }
 
 
@@ -393,7 +421,7 @@ static void stabilizerTask(void* param) {
 
 
 
-            if (actuatorThrust > 0) {
+            if (actuatorThrust > 0 && !throttleOff) {
 #if defined(TUNE_ROLL)
                 distributePower(actuatorThrust, actuatorRoll, 0, 0);
 #elif defined(TUNE_PITCH)
@@ -406,6 +434,8 @@ static void stabilizerTask(void* param) {
             } else {
                 distributePower(0, 0, 0, 0);
                 controllerResetAllPID();
+
+
             }
 #if 0
             static int i = 0;

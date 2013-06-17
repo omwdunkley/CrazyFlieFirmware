@@ -49,7 +49,7 @@ float q2 = 0.0f;
 float q3 = 0.0f;  // quaternion of sensor frame relative to auxiliary frame
 
 
-bool magImu = true;
+bool magImu = false;
 
 Axis3f grav; // estimated gravity direction
 Axis3f grav_offset; // estimated offset. computed when the flie has no thrust and is level //TODO: got to find a better way to do this
