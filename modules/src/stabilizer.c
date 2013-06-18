@@ -70,22 +70,19 @@ PRIVATE float zSpeed=0.0; // Vertical speed (world frame) integrated from vertic
 PRIVATE float zBias=0.0; // Vertical speed (world frame) integrated from vertical acceleration, but lots of smoothing to estiamte drift
 
 PRIVATE float voltageLong = 0;
-PRIVATE float voltageAlpha = 0.98;
+
 
 PRIVATE float temperature; // temp of barometer
 PRIVATE float asl; // m above ground
 PRIVATE float aslRaw; // m above ground
 PRIVATE float aslLong; // long term, used to estimate vertical speed using baro
-PRIVATE float aslAlpha = 0.92;
-PRIVATE float aslAlphaLong = 0.93;
+
 PRIVATE float asl_vspeed = 0.0;
 PRIVATE float acc_vspeed = 0.0;
-PRIVATE float zBiasAlpha = 0.995;
+PRIVATE float zBiasAlpha = 0.90;
 PRIVATE float pressure; // pressure
 PRIVATE float hover_error;
-PRIVATE float baro_asl_err_max = 0.6; //meters
-PRIVATE float asl_vspeedFac = 0;
-PRIVATE float acc_vspeedFac = 0;
+
 
 PRIVATE float eulerRollActual;
 PRIVATE float eulerPitchActual;
@@ -115,18 +112,33 @@ uint32_t motorPowerRear;
 
 bool hover = false;
 bool set_hover = false;
-float zDeadband = 0.01;
+
+float hover_kp                  = 0.5;
+float hover_ki                  = 0.18;
+float hover_kd                  = 0.0;
+float pid_fac                   = 13700; //relates meters asl to thrust
+float pidAlpha                  = 0.8;
+PRIVATE float baro_asl_err_max  = 1.0; //meters //TODO: rename and use constrain() instead
+PRIVATE float asl_vspeedFac     = 0;
+PRIVATE float aslAlpha          = 0.92;
+PRIVATE float aslAlphaLong      = 0.93;
+PRIVATE float acc_vspeedFac     = -36;
+uint16_t hover_minThrust         = 0;
+uint16_t hover_maxThrust         = 43000;
+uint16_t hover_baseThrust        = 60000;
+PRIVATE float voltageAlpha      = 0.98;
+float zSpeed_limit              = 0.05; //TODO useful number
+float err_deadband              = 0.00;
+float zAcc_deadband             = 0.05;
+float aslZSpeed_dead            = 0.005;
+
+
+
 float hover_change = 0;
 float hover_target = -1;
-float hover_kp=1.0;
-float hover_ki=0.0;
-float hover_kd=0.0;
 float hover_pid;
-float pidAlpha = 0.75;
-float pid_fac = 1.0; //relates meters asl to thrust //TODO bad name, nothing to to with magnetometer
-uint16_t hover_minThrust = 38000;
-uint16_t hover_maxThrust = 44000;
-uint16_t hover_baseThrust = 42000;
+
+
 LOG_GROUP_START(stabilizer)
 LOG_ADD(LOG_FLOAT, roll, &eulerRollActual)
 LOG_ADD(LOG_FLOAT, pitch, &eulerPitchActual)
@@ -209,13 +221,15 @@ PARAM_ADD(PARAM_FLOAT, pidAlpha, &pidAlpha)
 PARAM_ADD(PARAM_FLOAT, asl_vspeedFac, &asl_vspeedFac)
 PARAM_ADD(PARAM_FLOAT, pid_fac, &pid_fac)
 PARAM_ADD(PARAM_FLOAT, voltageAlpha, &voltageAlpha)
-PARAM_ADD(PARAM_FLOAT, zDeadband, &zDeadband)
 PARAM_ADD(PARAM_FLOAT, acc_vspeedFac, &acc_vspeedFac)
 PARAM_ADD(PARAM_FLOAT, zBiasAlpha, &zBiasAlpha)
 PARAM_ADD(PARAM_UINT8, throttleOff, &throttleOff)
-//PARAM_ADD(PARAM_FLOAT, zReduce, &zReduce)
-//PARAM_ADD(PARAM_FLOAT, zAccAlphaLong, &zAccelAvgAlpha)
-//PARAM_ADD(PARAM_FLOAT, zAccAlphaShort, &zAccelAlpha)
+
+PARAM_ADD(PARAM_FLOAT, err_deadband, &err_deadband)
+PARAM_ADD(PARAM_FLOAT, zSpeed_limit, &zSpeed_limit)
+PARAM_ADD(PARAM_FLOAT, zAcc_deadband, &zAcc_deadband)
+PARAM_ADD(PARAM_FLOAT, aslZSpeed_dead, &aslZSpeed_dead)
+
 PARAM_GROUP_STOP(hover)
 
 
@@ -223,7 +237,10 @@ PARAM_GROUP_STOP(hover)
 static bool isInit;
 
 static void distributePower(const uint16_t thrust, const int16_t roll, const int16_t pitch, const int16_t yaw);
+
 static uint16_t limitThrust(int32_t value);
+static float constrain(float value, const float minVal, const float maxVal);
+static float deadband(float value, const float threshold);
 static void stabilizerTask(void* param);
 
 void stabilizerInit(void) {
@@ -287,10 +304,13 @@ static void stabilizerTask(void* param) {
                 asl     = asl     * aslAlpha     + aslRaw * (1-aslAlpha);
                 aslLong = aslLong * aslAlphaLong + aslRaw * (1-aslAlphaLong);
 
-                // Vertical speed based on baro and acc
-                asl_vspeed = asl    - aslLong;
-                acc_vspeed = zSpeed - zBias;
+                // Vertical speed based on baro
+                asl_vspeed = deadband(asl - aslLong, aslZSpeed_dead);
 
+                // Vertical speed based on Acc - fused with baro to reduce drift
+                zSpeed  = constrain(zSpeed, -zSpeed_limit, zSpeed_limit);
+                zSpeed = zSpeed*zBiasAlpha + asl_vspeed*(1.f - zBiasAlpha);
+                acc_vspeed = zSpeed;
 
                 commanderGetHover(&hover, &set_hover, &hover_change);
                 // Set hover altitude
@@ -300,11 +320,12 @@ static void stabilizerTask(void* param) {
 
                     // Reset PID controller
                     pidInit(&altitude_pid, asl, hover_kp, hover_ki, hover_kd, BARO_UPDATE_DT );
+
                     // Reset hover_pid
                     hover_pid = pidUpdate(&altitude_pid, asl, false);
 
-                    zSpeed = 0.0;
-                    zBias = 0.0;
+                    //zSpeed = 0.0;
+                    //zBias = 0.0;
 
                     //Get hover voltage
                     voltageLong = pmGetBatteryVoltagePercent();
@@ -324,7 +345,8 @@ static void stabilizerTask(void* param) {
                     }
 
                     // Compute error (current - target), limit the error
-                    hover_error = min(baro_asl_err_max, max(-baro_asl_err_max, asl-hover_target));
+                    //hover_error = min(baro_asl_err_max, max(-baro_asl_err_max, asl-hover_target));
+                    hover_error =  constrain(deadband(asl-hover_target, err_deadband), -baro_asl_err_max, baro_asl_err_max);
                     pidSetError(&altitude_pid, -hover_error);
 
                     // Get control from PID controller, dont update the error (done above)
@@ -332,9 +354,6 @@ static void stabilizerTask(void* param) {
                     // TODO: same as smoothing the error??
                     hover_pid =   (pidAlpha    ) * hover_pid
                               + (1.f-pidAlpha) * ((acc_vspeed * acc_vspeedFac) + (asl_vspeed * asl_vspeedFac) + pidUpdate(&altitude_pid, asl, false));
-
-
-
 
 
 
@@ -367,13 +386,8 @@ static void stabilizerTask(void* param) {
                 sensfusion6GetWorldAcc(&accWorld);
 
                 // Estimate speed from acc (drifts)
-                zSpeed += accWorld.z * FUSION_UPDATE_DT;
+                zSpeed += deadband(accWorld.z, zAcc_deadband) * FUSION_UPDATE_DT;
 
-                // long term bias estimate
-                zBias  = zBias  * zBiasAlpha + zSpeed * (1.f - zBiasAlpha);
-
-                // Get speed
-                //acc_vspeed = zSpeed - zBias;
 
                 controllerCorrectAttitudePID(eulerRollActual, eulerPitchActual, eulerYawActual, eulerRollDesired, eulerPitchDesired, -eulerYawDesired, &rollRateDesired, &pitchRateDesired, &yawRateDesired);
                 attitudeCounter = 0;
@@ -481,5 +495,21 @@ static uint16_t limitThrust(int32_t value) {
     }
 
     return (uint16_t) value;
+}
+
+
+static float constrain(float value, const float minVal, const float maxVal){
+    return min(maxVal,max(minVal,value));
+}
+
+static float deadband(float value, const float threshold){
+    if(abs(value) < threshold) {
+      value = 0;
+    } else if(value > 0){
+      value -= threshold;
+    } else if(value < 0){
+      value += threshold;
+    }
+    return value;
 }
 
