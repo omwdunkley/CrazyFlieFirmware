@@ -79,7 +79,6 @@ PRIVATE float aslLong; // long term, used to estimate vertical speed using baro
 
 PRIVATE float asl_vspeed = 0.0;
 PRIVATE float acc_vspeed = 0.0;
-PRIVATE float zBiasAlpha = 0.90;
 PRIVATE float pressure; // pressure
 PRIVATE float hover_error;
 
@@ -116,16 +115,17 @@ bool set_hover = false;
 float hover_kp                  = 0.5;
 float hover_ki                  = 0.18;
 float hover_kd                  = 0.0;
-float pid_fac                   = 13700; //relates meters asl to thrust
+float pid_fac                   = 13000; //relates meters asl to thrust
 float pidAlpha                  = 0.8;
 PRIVATE float baro_asl_err_max  = 1.0; //meters //TODO: rename and use constrain() instead
 PRIVATE float asl_vspeedFac     = 0;
 PRIVATE float aslAlpha          = 0.92;
 PRIVATE float aslAlphaLong      = 0.93;
-PRIVATE float acc_vspeedFac     = -36;
-uint16_t hover_minThrust         = 0;
-uint16_t hover_maxThrust         = 43000;
-uint16_t hover_baseThrust        = 60000;
+PRIVATE float zBiasAlpha        = 0.91;
+PRIVATE float acc_vspeedFac     = -48;
+uint16_t hover_minThrust        = 0;
+uint16_t hover_baseThrust       = 43000;
+uint16_t hover_maxThrust        = 60000;
 PRIVATE float voltageAlpha      = 0.98;
 float zSpeed_limit              = 0.05; //TODO useful number
 float err_deadband              = 0.00;
