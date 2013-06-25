@@ -239,10 +239,10 @@ bool imu6Test(void) {
 //    ++counter;
 //}
 
-void imu9Read(Axis3f* gyroOut, Axis3f* accOut, Axis3f* magOut,  Axis3f* magOutRaw, const uint16_t thrust) {
+void imu9Read(Axis3f* gyroOut, Axis3f* accOut, Axis3f* magOutRaw) {
 
 
-    hmc5883lGetHeadingCalibrated(magOut, magOutRaw, thrust);
+    hmc5883lGetHeadingF(magOutRaw);
 
     // ACC / GYRO
     mpu6050GetMotion6(&accelMpu.x, &accelMpu.y, &accelMpu.z, &gyroMpu.x, &gyroMpu.y, &gyroMpu.z);

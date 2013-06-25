@@ -45,19 +45,6 @@
 uint8_t devAddr;
 uint8_t buffer[6];
 uint8_t mode;
-static MagCalibObject magCalib;
-
-PARAM_GROUP_START(magCalib)
-PARAM_ADD(PARAM_FLOAT, off_x, &magCalib.offset.x)
-PARAM_ADD(PARAM_FLOAT, off_y, &magCalib.offset.y)
-PARAM_ADD(PARAM_FLOAT, off_z, &magCalib.offset.z)
-PARAM_ADD(PARAM_FLOAT, scale_x, &magCalib.scale.x)
-PARAM_ADD(PARAM_FLOAT, scale_y, &magCalib.scale.y)
-PARAM_ADD(PARAM_FLOAT, scale_z, &magCalib.scale.z)
-PARAM_ADD(PARAM_FLOAT, thrust_x, &magCalib.thrust_comp.x)
-PARAM_ADD(PARAM_FLOAT, thrust_y, &magCalib.thrust_comp.y)
-PARAM_ADD(PARAM_FLOAT, thrust_z, &magCalib.thrust_comp.z)
-PARAM_GROUP_STOP(magCalib)
 
 
 
@@ -89,17 +76,6 @@ void hmc5883lInit(I2C_TypeDef *i2cPort) {
 
     // write CONFIG_B register
     hmc5883lSetGain(HMC5883L_GAIN_1090);
-
-    magCalib.scale.x = 0;
-    magCalib.scale.y = 0;
-    magCalib.scale.z = 0;
-    magCalib.offset.x = 0;
-    magCalib.offset.y = 0;
-    magCalib.offset.z = 0;
-    magCalib.thrust_comp.x = 0;
-    magCalib.thrust_comp.y = 0;
-    magCalib.thrust_comp.z = 0;
-    magCalib.calibrated = false;
 
     isInit = TRUE;
 }
@@ -381,7 +357,7 @@ void hmc5883lGetHeading(int16_t *x, int16_t *y, int16_t *z) {
 
 
 
-void hmc5883lGetHeadingCalibrated(Axis3f* magOut, Axis3f* magOutRaw, const uint16_t thrust) {
+void hmc5883lGetHeadingF(Axis3f* magOutRaw) {
     // Get raw data
     int16_t mx, my, mz;
     hmc5883lGetHeading(&mx, &my, &mz);
@@ -391,31 +367,6 @@ void hmc5883lGetHeadingCalibrated(Axis3f* magOut, Axis3f* magOutRaw, const uint1
     magOutRaw->y = (float) my;  // * 2.27;
     magOutRaw->z = (float) mz;  // * 2.27;
 
-
-
-    // If calibrated, return calibrated values, else return (0,0,0)
-    if (magCalib.calibrated) {
-        const float thrust_f = (float) thrust;
-        magOut->x = (magOutRaw->x - magCalib.offset.x) / magCalib.scale.x - thrust_f * magCalib.thrust_comp.x;
-        magOut->y = (magOutRaw->y - magCalib.offset.y) / magCalib.scale.y - thrust_f * magCalib.thrust_comp.y;
-        magOut->z = (magOutRaw->z - magCalib.offset.z) / magCalib.scale.z - thrust_f * magCalib.thrust_comp.z;
-    } else {
-        magOut->x = 0;
-        magOut->y = 0;
-        magOut->z = 0;
-
-        // TODO nicer way to do this?:
-        magCalib.calibrated =
-                (magCalib.offset.x  != 0.f) &&
-                (magCalib.offset.y  != 0.f) &&
-                (magCalib.offset.z  != 0.f) &&
-                (magCalib.scale.x  != 0.f) &&
-                (magCalib.scale.y  != 0.f) &&
-                (magCalib.scale.z  != 0.f) &&
-                (magCalib.thrust_comp.x  != 0.f) &&
-                (magCalib.thrust_comp.y  != 0.f) &&
-                (magCalib.thrust_comp.z  != 0.f);
-    }
 }
 
 

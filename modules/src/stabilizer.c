@@ -61,8 +61,7 @@
 PRIVATE Axis3f gyro; // Gyro axis data in deg/s
 PRIVATE Axis3f acc;  // Accelerometer axis data in mG
 PRIVATE Axis3f accWorld;  // Accelerometer world axis data in mG
-PRIVATE Axis3f mag;  //
-PRIVATE Axis3f magRaw;  //
+PRIVATE Axis3f magRaw, mag;  //
 
 PRIVATE bool throttleOff = false;
 
@@ -123,7 +122,7 @@ PRIVATE float aslAlpha          = 0.92;
 PRIVATE float aslAlphaLong      = 0.93;
 PRIVATE float zBiasAlpha        = 0.91;
 PRIVATE float acc_vspeedFac     = -48;
-uint16_t hover_minThrust        = 0;
+uint16_t hover_minThrust        = 00000;
 uint16_t hover_baseThrust       = 43000;
 uint16_t hover_maxThrust        = 60000;
 PRIVATE float voltageAlpha      = 0.98;
@@ -159,10 +158,10 @@ LOG_ADD(LOG_FLOAT, vLong, &voltageLong)
 LOG_GROUP_STOP(motor)
 
 LOG_GROUP_START(mag)
-LOG_ADD(LOG_FLOAT, x, &mag.x)
+LOG_ADD(LOG_FLOAT, x, &mag.x) //uncalibrated
 LOG_ADD(LOG_FLOAT, y, &mag.y)
 LOG_ADD(LOG_FLOAT, z, &mag.z)
-LOG_ADD(LOG_FLOAT, x_raw, &magRaw.x)
+LOG_ADD(LOG_FLOAT, x_raw, &magRaw.x) //uncalibrated
 LOG_ADD(LOG_FLOAT, y_raw, &magRaw.y)
 LOG_ADD(LOG_FLOAT, z_raw, &magRaw.z)
 LOG_GROUP_STOP(mag)
@@ -288,7 +287,7 @@ static void stabilizerTask(void* param) {
     while (1) {
         vTaskDelayUntil(&lastWakeTime, F2T(IMU_UPDATE_FREQ) );
 
-        imu9Read(&gyro, &acc, &mag, &magRaw, actuatorThrust);
+        imu9Read(&gyro, &acc, &magRaw);
 
         if (imu6IsCalibrated()) {
             commanderGetRPY(&eulerRollDesired, &eulerPitchDesired, &eulerYawDesired);
@@ -376,7 +375,16 @@ static void stabilizerTask(void* param) {
 
             // 250hz
             if (++attitudeCounter >= ATTITUDE_UPDATE_RATE_DIVIDER) {
-                sensfusion9UpdateQ( gyro, acc, mag, FUSION_UPDATE_DT);
+
+
+
+
+
+
+
+
+
+                sensfusion9UpdateQ( gyro, acc, magRaw, actuatorThrust, &mag, FUSION_UPDATE_DT);
 
 
                 sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
