@@ -48,8 +48,14 @@ float q1 = 0.0f;
 float q2 = 0.0f;
 float q3 = 0.0f;  // quaternion of sensor frame relative to auxiliary frame
 
-
 bool magImu = false;
+
+#define DRIFT_UPDATE_STEP 250
+int driftSteps = 0;
+bool magInitialized = false;
+Axis3f magCurrent; // current data
+float mYawInitial; // compass data when magImu is set
+float qYawInitial; // yaw from quaternion when magImu is set
 
 Axis3f grav; // estimated gravity direction
 Axis3f grav_offset; // estimated offset. computed when the flie has no thrust and is level //TODO: got to find a better way to do this
@@ -169,8 +175,17 @@ void sensfusion6UpdateQ(Axis3f g, Axis3f a, float dt) {
 void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f m, float dt) {
 
     if (!magImu){
-        return sensfusion6UpdateQ(g,a,dt);
+        return sensfusion6UpdateQ(g, a, dt);
+        magInitialized = false;
     }
+
+    // New Code
+
+    sensfusion6UpdateQ(g, a, dt);
+    magCurrent = m;
+    return;
+
+    // **** Old code *** //
 
     // Use IMU algorithm if magnetometer measurement invalid (avoids NaN in magnetometer normalisation)
     if ((m.x == 0.0f) && (m.y == 0.0f) && (m.z == 0.0f)) {
@@ -280,6 +295,38 @@ void sensfusion6GetEulerRPY(float* roll, float* pitch, float* yaw) {
     *yaw = atan2(2 * q1 * q2 - 2 * q0 * q3, 2 * q0 * q0 + 2 * q1 * q1 - 1) * RAD2DEG;
     *pitch = atan(grav.x / sqrt(grav.y * grav.y + grav.z * grav.z)) * RAD2DEG;
     *roll = atan(grav.y / sqrt(grav.x * grav.x + grav.z * grav.z)) * RAD2DEG;
+
+    // Correct for gyro drift with magnetometer data
+    if (magInitialized == false && magImu == true) {
+    	qYawInitial = *yaw;
+    	mYawInitial = atan2(magCurrent[0], magCurrent[1]);
+    	magInitialized = true;
+    }
+
+    // Only do correction when we are relatively flat
+    if (driftSteps >= DRIFT_UPDATE_STEP) {
+    	if (*pitch > -5 && *pitch < 5 && *roll > -5 && *roll < 5) {
+    		float mYaw = atan2(magCurrent[0], magCurrent[1]);
+
+    		*yaw = (*yaw - qYawInitial) - (mYaw - mYawInitial);
+
+    		// Update quaternion with new yaw
+    		const float cr2 = cos(*roll / 2);
+    		const float cp2 = cos(*pitch / 2);
+    		const float cy2 = cos(*yaw / 2);
+    		const float sr2 = sin(*roll / 2);
+    		const float sp2 = sin(*pitch / 2);
+    		const float sy2 = sin(*yaw / 2);
+
+    		q0 = cr2 * cp2 * cy2 + sr2 * sp2 * sy2;
+    		q1 = sr2 * cp2 * cy2 - cr2 * sp2 * sy2;
+    		q2 = cr2 * sp2 * cy2 + sr2 * cp2 * sy2;
+    		q3 = cr2 * cp2 * sy2 + sr2 * sp2 * cy2;
+    	}
+    	driftSteps = 0;
+    } else {
+    	driftSteps += 1;
+    }
 }
 
 void quatMul(const float q1w, const float q1x, const float q1y, const float q1z, const float q2w, const float q2x, const float q2y, const float q2z, float* q3w, float* q3x, float* q3y, float* q3z) {

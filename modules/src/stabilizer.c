@@ -378,7 +378,6 @@ static void stabilizerTask(void* param) {
             if (++attitudeCounter >= ATTITUDE_UPDATE_RATE_DIVIDER) {
                 sensfusion9UpdateQ( gyro, acc, mag, FUSION_UPDATE_DT);
 
-
                 sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
 
                 // Get acc in world frame, update error
