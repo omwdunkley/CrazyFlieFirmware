@@ -258,7 +258,7 @@ void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f magRaw, uint16_t actuatorThru
     //getMagnetometerCalibrated(&magRaw, actuatorThrust, m);
 
     // New Code
-    magCurrent = m;
+    magCurrent = *m;
     sensfusion6UpdateQ(g, a, dt);
     
     return;
@@ -377,14 +377,14 @@ void sensfusion6GetEulerRPY(float* roll, float* pitch, float* yaw) {
     // Correct for gyro drift with magnetometer data
     if (magInitialized == false && magImu == true) {
     	qYawInitial = *yaw;
-    	mYawInitial = atan2(magCurrent[0], magCurrent[1])* RAD2DEG;
+    	mYawInitial = atan2(magCurrent.x, magCurrent.y)* RAD2DEG;
     	magInitialized = true;
     }
 
     // Only do correction when we are relatively flat
     if (driftSteps >= DRIFT_UPDATE_STEP && magImu == true) {
     	if (*pitch > -5 && *pitch < 5 && *roll > -5 && *roll < 5) {
-    		float mYaw = atan2(magCurrent[0], magCurrent[1])* RAD2DEG;
+    		float mYaw = atan2(magCurrent.x, magCurrent.y)* RAD2DEG;
 
     		*yaw = (*yaw - qYawInitial) - (mYaw - mYawInitial);
 
