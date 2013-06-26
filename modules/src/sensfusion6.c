@@ -31,7 +31,7 @@
 #include "param.h"
 #include "global.h"
 #include "log.h"
-
+#include "debug.h"
 //#define MADWICK_QUATERNION_IMU
 
 #define TWO_KP_DEF  (2.0f * 0.4f) // 2 * proportional gain
@@ -48,7 +48,10 @@ float q1 = 0.0f;
 float q2 = 0.0f;
 float q3 = 0.0f;  // quaternion of sensor frame relative to auxiliary frame
 
+
 bool magImu = false;
+//Previously using mag data for 9d fusion
+bool preMagImu = false;
 
 #define DRIFT_UPDATE_STEP 250
 int driftSteps = 0;
@@ -73,19 +76,65 @@ LOG_ADD(LOG_FLOAT, x, &grav_offset.x)
 LOG_ADD(LOG_FLOAT, y, &grav_offset.y)
 LOG_ADD(LOG_FLOAT, z, &grav_offset.z)
 LOG_GROUP_STOP(gravoffset)
+
+
+// hmc calibration data
+static MagCalibObject magCalib;
+
+PARAM_GROUP_START(magCalib)
+PARAM_ADD(PARAM_FLOAT, off_x, &magCalib.offset.x)
+PARAM_ADD(PARAM_FLOAT, off_y, &magCalib.offset.y)
+PARAM_ADD(PARAM_FLOAT, off_z, &magCalib.offset.z)
+PARAM_ADD(PARAM_FLOAT, scale_x, &magCalib.scale.x)
+PARAM_ADD(PARAM_FLOAT, scale_y, &magCalib.scale.y)
+PARAM_ADD(PARAM_FLOAT, scale_z, &magCalib.scale.z)
+PARAM_ADD(PARAM_FLOAT, thrust_x, &magCalib.thrust_comp.x)
+PARAM_ADD(PARAM_FLOAT, thrust_y, &magCalib.thrust_comp.y)
+PARAM_ADD(PARAM_FLOAT, thrust_z, &magCalib.thrust_comp.z)
+PARAM_GROUP_STOP(magCalib)
+
+
+
+
 static bool isInit;
 
 // TODO: Make math util file
 static float invSqrt(float x);
 
 void sensfusion6Init() {
-    if (isInit)
+    if (isInit){
+
+        q0 = 1.0f;
+        q1 = 0.0f;
+        q2 = 0.0f;
+        q3 = 0.0f;  // quaternion of sensor frame relative to auxiliary frame
+        integralFBx = 0.0f;
+        integralFBy = 0.0f;
+        integralFBz = 0.0f;
         return;
+    }
+
     grav_offset.x = 0;
     grav_offset.y = 0;
     grav_offset.z = 0;
-
     isInit = TRUE;
+
+    magCalib.scale.x = 0;
+    magCalib.scale.y = 0;
+    magCalib.scale.z = 0;
+    magCalib.offset.x = 0;
+    magCalib.offset.y = 0;
+    magCalib.offset.z = 0;
+    magCalib.thrust_comp.x = 0;
+    magCalib.thrust_comp.y = 0;
+    magCalib.thrust_comp.z = 0;
+    q0 = 1.0f;
+    q1 = 0.0f;
+    q2 = 0.0f;
+    q3 = 0.0f;  // quaternion of sensor frame relative to auxiliary frame
+    integralFBx = 0.0f;
+    integralFBy = 0.0f;
+    integralFBz = 0.0f;
 }
 
 bool sensfusion6Test(void) {
@@ -171,24 +220,53 @@ void sensfusion6UpdateQ(Axis3f g, Axis3f a, float dt) {
     grav.z = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 }
 
+
+
+void getMagnetometerCalibrated(const Axis3f* magIn, const uint16_t thrust, Axis3f* magOut){
+
+    // If calibrated, return calibrated values, else return (0,0,0)
+    if ((magCalib.scale.x  != 0.f) && //check divide by 0
+            (magCalib.scale.y  != 0.f) &&
+            (magCalib.scale.z  != 0.f)) {
+        const float thrust_f = (float) thrust;
+        magOut->x = (magIn->x - magCalib.offset.x) / magCalib.scale.x - thrust_f * magCalib.thrust_comp.x;
+        magOut->y = (magIn->y - magCalib.offset.y) / magCalib.scale.y - thrust_f * magCalib.thrust_comp.y;
+        magOut->z = (magIn->z - magCalib.offset.z) / magCalib.scale.z - thrust_f * magCalib.thrust_comp.z;
+    } else {
+        magOut->x = 0;
+        magOut->y = 0;
+        magOut->z = -1; //TODO remove this -1;
+    }
+}
+
 // Madgwick's implementation of Mayhony's AHRS algorithm.
-void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f m, float dt) {
+void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f magRaw, uint16_t actuatorThrust, Axis3f* m, float dt) {
+    if (preMagImu != magImu){
+        DEBUG_PRINT("IMU Method changed, SenFu reInit.\n");
+        // Changed imu method, reset
+        // TODO check led is doing what it should
+        sensfusion6Init();
+
+    }
+    preMagImu = magImu;
 
     if (!magImu){
         return sensfusion6UpdateQ(g, a, dt);
         magInitialized = false;
     }
 
-    // New Code
+    //getMagnetometerCalibrated(&magRaw, actuatorThrust, m);
 
-    sensfusion6UpdateQ(g, a, dt);
+    // New Code
     magCurrent = m;
+    sensfusion6UpdateQ(g, a, dt);
+    
     return;
 
     // **** Old code *** //
 
     // Use IMU algorithm if magnetometer measurement invalid (avoids NaN in magnetometer normalisation)
-    if ((m.x == 0.0f) && (m.y == 0.0f) && (m.z == 0.0f)) {
+    if ((m->x == 0.0f) && (m->y == 0.0f) && (m->z == 0.0f)) {
         sensfusion6UpdateQ(g, a, dt);
         return;
     }
@@ -210,10 +288,10 @@ void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f m, float dt) {
         a.z *= recipNorm;
 
         // Normalise magnetometer measurement
-        recipNorm = invSqrt(m.x * m.x + m.y * m.y + m.z * m.z);
-        m.x *= recipNorm;
-        m.y *= recipNorm;
-        m.z *= recipNorm;
+        recipNorm = invSqrt(m->x * m->x + m->y * m->y + m->z * m->z);
+        m->x *= recipNorm;
+        m->y *= recipNorm;
+        m->z *= recipNorm;
 
         // Auxiliary variables to avoid repeated arithmetic
         q0q0 = q0 * q0;
@@ -228,10 +306,10 @@ void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f m, float dt) {
         q3q3 = q3 * q3;
 
         // Reference direction of Earth's magnetic field
-        hx = 2.0f * (m.x * (0.5f - q2q2 - q3q3) + m.y * (q1q2 - q0q3) + m.z * (q1q3 + q0q2));
-        hy = 2.0f * (m.x * (q1q2 + q0q3) + m.y * (0.5f - q1q1 - q3q3) + m.z * (q2q3 - q0q1));
+        hx = 2.0f * (m->x * (0.5f - q2q2 - q3q3) + m->y * (q1q2 - q0q3) + m->z * (q1q3 + q0q2));
+        hy = 2.0f * (m->x * (q1q2 + q0q3) + m->y * (0.5f - q1q1 - q3q3) + m->z * (q2q3 - q0q1));
         bx = sqrt(hx * hx + hy * hy);
-        bz = 2.0f * (m.x * (q1q3 - q0q2) + m.y * (q2q3 + q0q1) + m.z * (0.5f - q1q1 - q2q2));
+        bz = 2.0f * (m->x * (q1q3 - q0q2) + m->y * (q2q3 + q0q1) + m->z * (0.5f - q1q1 - q2q2));
 
         // Estimated direction of gravity and magnetic field
         halfvx = q1q3 - q0q2;
@@ -242,9 +320,9 @@ void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f m, float dt) {
         halfwz = bx * (q0q2 + q1q3) + bz * (0.5f - q1q1 - q2q2);
 
         // Error is sum of cross product between estimated direction and measured direction of field vectors
-        halfex = (a.y * halfvz - a.z * halfvy) + (m.y * halfwz - m.z * halfwy);
-        halfey = (a.z * halfvx - a.x * halfvz) + (m.z * halfwx - m.x * halfwz);
-        halfez = (a.x * halfvy - a.y * halfvx) + (m.x * halfwy - m.y * halfwx);
+        halfex = (a.y * halfvz - a.z * halfvy) + (m->y * halfwz - m->z * halfwy);
+        halfey = (a.z * halfvx - a.x * halfvz) + (m->z * halfwx - m->x * halfwz);
+        halfez = (a.x * halfvy - a.y * halfvx) + (m->x * halfwy - m->y * halfwx);
 
         // Compute and apply integral feedback if enabled
         if (twoKi > 0.0f) {
@@ -299,14 +377,14 @@ void sensfusion6GetEulerRPY(float* roll, float* pitch, float* yaw) {
     // Correct for gyro drift with magnetometer data
     if (magInitialized == false && magImu == true) {
     	qYawInitial = *yaw;
-    	mYawInitial = atan2(magCurrent[0], magCurrent[1]);
+    	mYawInitial = atan2(magCurrent[0], magCurrent[1])* RAD2DEG;
     	magInitialized = true;
     }
 
     // Only do correction when we are relatively flat
-    if (driftSteps >= DRIFT_UPDATE_STEP) {
+    if (driftSteps >= DRIFT_UPDATE_STEP && magImu == true) {
     	if (*pitch > -5 && *pitch < 5 && *roll > -5 && *roll < 5) {
-    		float mYaw = atan2(magCurrent[0], magCurrent[1]);
+    		float mYaw = atan2(magCurrent[0], magCurrent[1])* RAD2DEG;
 
     		*yaw = (*yaw - qYawInitial) - (mYaw - mYawInitial);
 

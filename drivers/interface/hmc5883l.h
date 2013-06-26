@@ -121,15 +121,6 @@ THE SOFTWARE.
 
 
 
-
-typedef struct {
-  Axis3f offset;       //< centers the magnetic field ellipse to origin
-  Axis3f scale;        //< spherises the ellipse to a unit sphere
-  Axis3f thrust_comp;  //< compensates for thrust. Vector points in direction of magnetic distortion with length*thrust = offset in this direction
-  bool calibrated;
-} MagCalibObject;
-
-
 void hmc5883lInit(I2C_TypeDef *i2cPort);
 bool hmc5883lTestConnection();
 bool hmc5883lSelfTest();
@@ -170,6 +161,6 @@ uint8_t hmc5883lGetIDC();
 
 // High level
 //
-void hmc5883lGetHeadingCalibrated(Axis3f* magOut, Axis3f* magOutRaw, const uint16_t thrust);
+void hmc5883lGetHeadingF(Axis3f* magOutRaw);
 
 #endif /* HMC5883L_H_ */
