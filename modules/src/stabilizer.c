@@ -389,6 +389,10 @@ static void stabilizerTask(void* param) {
 
                 sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
 
+
+
+
+
                 // Get acc in world frame, update error
                 sensfusion6UpdateWorldAcc(&acc, (fabs(eulerRollActual)<2 && fabs(eulerPitchActual)<2));
                 sensfusion6GetWorldAcc(&accWorld);

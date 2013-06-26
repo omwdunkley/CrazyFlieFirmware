@@ -95,8 +95,18 @@ static bool isInit;
 static float invSqrt(float x);
 
 void sensfusion6Init() {
-    if (isInit)
+    if (isInit){
+
+        q0 = 1.0f;
+        q1 = 0.0f;
+        q2 = 0.0f;
+        q3 = 0.0f;  // quaternion of sensor frame relative to auxiliary frame
+        integralFBx = 0.0f;
+        integralFBy = 0.0f;
+        integralFBz = 0.0f;
         return;
+    }
+
     grav_offset.x = 0;
     grav_offset.y = 0;
     grav_offset.z = 0;
@@ -218,7 +228,7 @@ void getMagnetometerCalibrated(const Axis3f* magIn, const uint16_t thrust, Axis3
     } else {
         magOut->x = 0;
         magOut->y = 0;
-        magOut->z = 0;
+        magOut->z = -1; //TODO remove this -1;
     }
 }
 
@@ -228,7 +238,6 @@ void sensfusion9UpdateQ(Axis3f g, Axis3f a, Axis3f magRaw, uint16_t actuatorThru
         DEBUG_PRINT("IMU Method changed, SenFu reInit.\n");
         // Changed imu method, reset
         // TODO check led is doing what it should
-        isInit = false;
         sensfusion6Init();
 
     }
